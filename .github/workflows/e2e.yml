@@ -1,0 +1,66 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # Allows manual trigger
+
+jobs:
+  e2e-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Run Playwright tests
+        run: npm run test:e2e-ci
+        continue-on-error: true
+
+      - name: Process test results
+        id: format_message
+        run: |
+          echo "📋 Processing test results..."
+          SUMMARY=""
+
+          if [ -f failed-tests.json ]; then
+            FAILED_COUNT=$(jq '.failedTests | length' failed-tests.json)
+
+            if [ "$FAILED_COUNT" -gt 0 ]; then
+              echo "❌ $FAILED_COUNT test(s) failed:"
+              SUMMARY="❌ $FAILED_COUNT test(s) failed:\n"
+              SUMMARY+=$(jq -r '.failedTests[] | "- Test: \(.testName)\n  Error: \(.error.message // "No error message")\n"' failed-tests.json)
+            else
+              SUMMARY="✅ All tests passed!"
+            fi
+          else
+            SUMMARY="⚠️ failed-tests.json not found"
+          fi
+
+          echo -e "$SUMMARY"
+          echo "summary=$SUMMARY" >> $GITHUB_OUTPUT
+
+          if echo "$SUMMARY" | grep -q "❌"; then
+            exit 1
+          fi
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 30
